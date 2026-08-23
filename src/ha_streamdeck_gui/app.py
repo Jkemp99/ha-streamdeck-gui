@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +22,20 @@ from ha_streamdeck_gui.assets import (
     save_asset,
 )
 from ha_streamdeck_gui.decks import get_deck_model, list_deck_models
+from ha_streamdeck_gui.deck_service import (
+    SERVICE_NAME,
+    DeckServiceError,
+    apply_from_settings,
+    service_status as deck_service_status,
+    start_user_service,
+)
 from ha_streamdeck_gui.ha import (
     HomeAssistantError,
     get_cache,
     public_entities,
     refresh_cache,
     suggested_service,
-    test_connection,
+    test_home_assistant,
 )
 from ha_streamdeck_gui.lint import lint_config
 from ha_streamdeck_gui.sample import build_sample_config, sample_yaml
@@ -332,7 +338,7 @@ def get_asset(name: str) -> FileResponse:
 def ha_test() -> dict[str, Any]:
     settings = load_settings()
     try:
-        return test_connection(settings.ha_url, settings.ha_token)
+        return test_home_assistant(settings.ha_url, settings.ha_token)
     except HomeAssistantError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -371,52 +377,29 @@ def ha_suggest(entity_id: str) -> dict[str, str | None]:
 
 @app.get("/api/service/status")
 def service_status() -> dict[str, Any]:
+    return deck_service_status()
+
+
+@app.post("/api/service/apply")
+def service_apply() -> dict[str, Any]:
     settings = load_settings()
-    name = settings.systemd_service_name
-    if not name:
-        return {"configured": False, "running": None, "note": "No systemd service name set."}
     try:
-        active = subprocess.run(
-            ["systemctl", "is-active", name],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        logs = subprocess.run(
-            ["journalctl", "-u", name, "-n", "20", "--no-pager"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError as exc:
-        return {"configured": True, "running": False, "error": str(exc)}
-    return {
-        "configured": True,
-        "running": active.stdout.strip() == "active",
-        "state": active.stdout.strip(),
-        "logs": logs.stdout,
-        "note": (
-            "If auto_reload is true in streamdeck.yaml, a restart is usually unnecessary. "
-            "The upstream process watches the file and reloads it."
-        ),
-    }
+        test_home_assistant(settings.ha_url, settings.ha_token)
+        result = apply_from_settings(settings)
+    except (HomeAssistantError, DeckServiceError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    merged = merge_settings(settings, {"systemd_service_name": SERVICE_NAME})
+    save_settings(merged)
+    return result
 
 
 @app.post("/api/service/restart")
 def service_restart() -> dict[str, Any]:
-    settings = load_settings()
-    name = settings.systemd_service_name
-    if not name:
-        raise HTTPException(400, "No systemd service name configured.")
-    result = subprocess.run(
-        ["systemctl", "restart", name],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise HTTPException(400, result.stderr or result.stdout or "Restart failed")
-    return {"ok": True, "note": "Restarted. Prefer auto_reload: true instead of routine restarts."}
+    try:
+        start_user_service()
+    except DeckServiceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, **deck_service_status()}
 
 
 def create_app() -> FastAPI:

@@ -55,7 +55,11 @@ In **Settings**:
 2. Set the Home Assistant URL **including the port**, for example `http://192.168.1.10:8123`.
 3. Paste a Home Assistant long-lived access token. It stays on the server.
 4. Pick your deck model (`mini`, `original`, `mk2`, `xl`, `plus`, `neo`).
-5. Use **Test connection**, then **Fetch entities**.
+5. Use **Test Home Assistant** (REST and websocket), then **Fetch devices**.
+6. Click **Apply to Stream Deck**. That writes `deck.env` next to the YAML from the
+   token already stored on the server, installs `home-assistant-streamdeck-yaml`
+   if needed, and starts it as a user systemd service. The top bar should say
+   **Deck: running**.
 
 Edit keys and dials, then **Save**. Each save writes a timestamped backup next to the YAML file.
 

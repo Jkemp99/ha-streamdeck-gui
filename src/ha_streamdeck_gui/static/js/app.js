@@ -461,34 +461,123 @@ function moveButton(from, to) {
   render();
 }
 
+const COMMON_DOMAINS = [
+  "light",
+  "switch",
+  "scene",
+  "script",
+  "media_player",
+  "cover",
+  "climate",
+  "fan",
+  "lock",
+  "input_boolean",
+  "input_number",
+  "input_select",
+  "automation",
+  "button",
+  "vacuum",
+  "siren",
+  "timer",
+];
+
+async function refreshEntities() {
+  const result = await api("/api/ha/refresh", { method: "POST" });
+  const listed = await api("/api/ha/entities");
+  state.entities = listed.entities || [];
+  return result;
+}
+
 function entityPicker(value, onPick) {
   const wrap = document.createElement("div");
-  const input = textInput(value || "", onPick, "light.kitchen or search kitchen");
+  wrap.className = "entity-picker";
+  const currentDomain = (value || "").split(".")[0] || "";
+  const domain = document.createElement("select");
+  const search = textInput("", () => {}, "Search by name, e.g. kitchen");
+  search.placeholder = "Search by name, e.g. kitchen";
   const results = document.createElement("div");
   results.className = "entity-results";
-  const draw = (query) => {
+  const meta = document.createElement("p");
+  meta.className = "hint entity-meta";
+
+  const domains = [...new Set([...COMMON_DOMAINS, ...state.entities.map((entity) => entity.domain)])]
+    .filter(Boolean)
+    .sort((a, b) => {
+      const ai = COMMON_DOMAINS.indexOf(a);
+      const bi = COMMON_DOMAINS.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  [["", `All domains (${state.entities.length})`], ...domains.map((name) => [name, name])].forEach(([id, label]) => {
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = label;
+    domain.append(option);
+  });
+  domain.value = domains.includes(currentDomain) ? currentDomain : "";
+
+  const draw = () => {
     results.innerHTML = "";
-    const q = (query || "").toLowerCase();
-    state.entities
-      .filter((entity) => !q || `${entity.friendly_name} ${entity.entity_id} ${entity.domain}`.toLowerCase().includes(q))
-      .slice(0, 20)
-      .forEach((entity) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.innerHTML = `<strong>${entity.friendly_name}</strong><small>${entity.entity_id} · ${entity.state}</small>`;
-        btn.addEventListener("click", async () => {
-          input.value = entity.entity_id;
-          onPick(entity.entity_id);
-          const hint = await api(`/api/ha/suggest-service?entity_id=${encodeURIComponent(entity.entity_id)}`);
-          if (hint.service && state.selected?.kind === "button") patchButton({ service: hint.service });
-          if (hint.service && ["dial", "strip"].includes(state.selected?.kind)) patchDial({ service: hint.service });
-        });
-        results.append(btn);
+    const query = search.value.trim().toLowerCase();
+    const selectedDomain = domain.value;
+    const matches = state.entities.filter((entity) => {
+      if (selectedDomain && entity.domain !== selectedDomain) return false;
+      if (!query) return true;
+      return `${entity.friendly_name} ${entity.entity_id} ${entity.domain}`.toLowerCase().includes(query);
+    });
+    meta.textContent = state.entities.length
+      ? `${matches.length} device${matches.length === 1 ? "" : "s"} — click one to assign it`
+      : "";
+    matches.slice(0, 120).forEach((entity) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      if (entity.entity_id === value) btn.classList.add("active");
+      const title = document.createElement("strong");
+      title.textContent = entity.friendly_name;
+      const detail = document.createElement("small");
+      detail.textContent = `${entity.entity_id} · ${entity.state}`;
+      btn.append(title, detail);
+      btn.addEventListener("click", async () => {
+        onPick(entity.entity_id);
+        const hint = await api(`/api/ha/suggest-service?entity_id=${encodeURIComponent(entity.entity_id)}`);
+        if (hint.service && state.selected?.kind === "button") patchButton({ service: hint.service });
+        if (hint.service && ["dial", "strip"].includes(state.selected?.kind)) patchDial({ service: hint.service });
       });
+      results.append(btn);
+    });
+    if (!state.entities.length) {
+      const empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = state.settings?.ha_token_set
+        ? "No devices loaded yet. Fetch them from Home Assistant."
+        : "Add your Home Assistant URL and token in Settings, then fetch devices.";
+      const fetchBtn = document.createElement("button");
+      fetchBtn.type = "button";
+      fetchBtn.className = "fetch-devices";
+      fetchBtn.textContent = "Fetch devices";
+      fetchBtn.addEventListener("click", async () => {
+        try {
+          const result = await refreshEntities();
+          flash(`${result.entity_count} devices loaded`);
+          render();
+        } catch (error) {
+          flash(error.message, true);
+        }
+      });
+      results.append(empty, fetchBtn);
+    }
   };
-  input.addEventListener("input", () => draw(input.value));
-  wrap.append(input, results);
-  if (state.entities.length) draw("");
+
+  domain.addEventListener("change", draw);
+  search.addEventListener("input", draw);
+  search.addEventListener("change", () => {
+    const raw = search.value.trim();
+    if (raw.includes(".") && !raw.includes(" ")) onPick(raw);
+  });
+  wrap.append(domain, search, meta, results);
+  draw();
   return wrap;
 }
 
@@ -749,7 +838,8 @@ async function saveFile() {
     state.issues = result.issues;
     state.dirty = false;
     render();
-    flash("Saved");
+    const deck = await refreshDeckStatus();
+    flash(deck.running ? "Saved. The Stream Deck will reload the file." : "Saved the YAML, but the Stream Deck service is not running. Open Settings and click Apply to Stream Deck.");
   } catch (error) {
     flash(error.message, true);
   }
@@ -783,8 +873,26 @@ function fillSettingsForm() {
   form.ha_token.value = "";
   form.ha_token.placeholder = state.settings.ha_token_set ? "Token is set — leave blank to keep" : "Long-lived access token";
   form.backup_count.value = state.settings.backup_count;
-  form.systemd_service_name.value = state.settings.systemd_service_name || "";
   form.assets_dir.value = state.settings.assets_dir || "";
+}
+
+async function refreshDeckStatus() {
+  const el = document.getElementById("deck-status");
+  try {
+    const status = await api("/api/service/status");
+    if (status.running) {
+      el.className = "status ok";
+      el.textContent = "Deck: running";
+    } else {
+      el.className = "status err";
+      el.textContent = "Deck: not running";
+    }
+    return status;
+  } catch {
+    el.className = "status muted";
+    el.textContent = "Deck: unknown";
+    return { running: false };
+  }
 }
 
 async function init() {
@@ -794,9 +902,13 @@ async function init() {
   try {
     const entities = await api("/api/ha/entities");
     state.entities = entities.entities || [];
+    if (!state.entities.length && state.settings?.ha_token_set) {
+      await refreshEntities();
+    }
   } catch {
     state.entities = [];
   }
+  await refreshDeckStatus();
   try {
     await openFile();
   } catch {
@@ -842,7 +954,6 @@ async function init() {
       streamdeck_yaml_path: form.streamdeck_yaml_path.value,
       ha_url: form.ha_url.value,
       backup_count: Number(form.backup_count.value),
-      systemd_service_name: form.systemd_service_name.value,
       assets_dir: form.assets_dir.value,
     };
     if (form.ha_token.value) payload.ha_token = form.ha_token.value;
@@ -864,7 +975,33 @@ async function init() {
       }
       const result = await api("/api/ha/test", { method: "POST" });
       status.className = "status ok";
-      status.textContent = result.message || "Connected";
+      const version = result.websocket?.ha_version ? ` HA ${result.websocket.ha_version}` : "";
+      status.textContent = `REST and websocket OK${version}`;
+    } catch (error) {
+      status.className = "status err";
+      status.textContent = error.message;
+    }
+  });
+  document.getElementById("btn-deck-apply").addEventListener("click", async () => {
+    const status = document.getElementById("ha-status");
+    try {
+      const form = document.getElementById("settings-form");
+      const payload = {
+        streamdeck_yaml_path: form.streamdeck_yaml_path.value,
+        ha_url: form.ha_url.value,
+        backup_count: Number(form.backup_count.value),
+        assets_dir: form.assets_dir.value,
+      };
+      if (form.ha_token.value) payload.ha_token = form.ha_token.value;
+      state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+      status.className = "status";
+      status.textContent = "Applying…";
+      const result = await api("/api/service/apply", { method: "POST" });
+      await refreshDeckStatus();
+      status.className = result.running ? "status ok" : "status err";
+      status.textContent = result.running
+        ? "Stream Deck service is running. Save in the editor to update keys."
+        : (result.note || "Service did not stay running. Check the Pi logs.");
     } catch (error) {
       status.className = "status err";
       status.textContent = error.message;
@@ -873,11 +1010,10 @@ async function init() {
   document.getElementById("btn-ha-refresh").addEventListener("click", async () => {
     const status = document.getElementById("ha-status");
     try {
-      const result = await api("/api/ha/refresh", { method: "POST" });
-      const entities = await api("/api/ha/entities");
-      state.entities = entities.entities || [];
+      const result = await refreshEntities();
       status.className = "status ok";
-      status.textContent = `${result.entity_count} entities`;
+      status.textContent = `${result.entity_count} devices`;
+      render();
     } catch (error) {
       status.className = "status err";
       status.textContent = error.message;

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -9,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import websockets
 
 log = logging.getLogger("ha_streamdeck_gui.ha")
 
@@ -73,6 +76,26 @@ def normalize_ha_url(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def hass_streamdeck_endpoint(url: str) -> tuple[str, str]:
+    """Host:port and ws/wss for home-assistant-streamdeck-yaml.
+
+    Upstream often ignores a separate HASS_PORT and connects to 80. Always put
+    the port on the host for http:// URLs.
+    """
+    base = normalize_ha_url(url)
+    parsed = urlparse(base)
+    if not parsed.hostname:
+        raise HomeAssistantError("Home Assistant URL is missing a host.")
+    protocol = "wss" if parsed.scheme == "https" else "ws"
+    if parsed.port:
+        host = f"{parsed.hostname}:{parsed.port}"
+    elif parsed.scheme == "http":
+        host = f"{parsed.hostname}:8123"
+    else:
+        host = parsed.hostname
+    return host, protocol
+
+
 def _headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
@@ -105,6 +128,45 @@ def test_connection(url: str, token: str) -> dict[str, Any]:
             f"Could not reach {base}. Include the port in the URL if Home Assistant is not on 80/443.",
         ) from exc
     return {"ok": True, "message": body.get("message", "ok"), "url": base}
+
+
+def test_websocket(url: str, token: str) -> dict[str, Any]:
+    if not token:
+        raise HomeAssistantError("Home Assistant token is not set.")
+    host, protocol = hass_streamdeck_endpoint(url)
+    uri = f"{protocol}://{host}/api/websocket"
+
+    async def _run() -> dict[str, Any]:
+        try:
+            async with websockets.connect(uri, open_timeout=8, close_timeout=2, max_size=10_485_760) as socket:
+                hello = json.loads(await asyncio.wait_for(socket.recv(), 8))
+                if hello.get("type") != "auth_required":
+                    raise HomeAssistantError(
+                        f"Unexpected Home Assistant websocket hello: {hello.get('type')!r}",
+                    )
+                await socket.send(json.dumps({"type": "auth", "access_token": token.strip()}))
+                reply = json.loads(await asyncio.wait_for(socket.recv(), 8))
+        except TimeoutError as exc:
+            raise HomeAssistantError(f"Timed out talking to {uri}") from exc
+        except OSError as exc:
+            raise HomeAssistantError(f"Could not open {uri}") from exc
+        kind = reply.get("type")
+        if kind == "auth_ok":
+            return {"ok": True, "ha_version": reply.get("ha_version"), "uri": uri, "host": host, "protocol": protocol}
+        if kind == "auth_invalid":
+            raise HomeAssistantError(
+                "Home Assistant rejected the token on the websocket. "
+                "Create a new long-lived token in your profile and save it in Settings.",
+            )
+        raise HomeAssistantError(f"Unexpected Home Assistant auth reply: {kind!r}")
+
+    return asyncio.run(_run())
+
+
+def test_home_assistant(url: str, token: str) -> dict[str, Any]:
+    rest = test_connection(url, token)
+    websocket = test_websocket(url, token)
+    return {"ok": True, "rest": rest, "websocket": websocket}
 
 
 def refresh_cache(url: str, token: str) -> EntityCache:

@@ -20,6 +20,7 @@
         <span>Device</span>
         <select id="deck-model"></select>
       </label>
+      <span id="deck-status" class="status muted">Deck: unknown</span>
       <div class="top-actions">
         <button id="btn-sample" class="ghost" type="button">Load sample</button>
         <button id="btn-yaml" class="ghost" type="button">YAML</button>
@@ -76,18 +77,18 @@
         <label>Backup count
           <input name="backup_count" type="number" min="1" max="100" />
         </label>
-        <label>systemd service name (optional)
-          <input name="systemd_service_name" type="text" placeholder="home-assistant-streamdeck-yaml" />
-        </label>
         <label>Custom icon folder (optional)
           <input name="assets_dir" type="text" placeholder="Defaults to &lt;yaml-dir&gt;/assets" autocomplete="off" />
         </label>
         <p class="hint">
-          With <code>auto_reload: true</code> in the YAML, a service restart is usually unnecessary.
+          Save settings, test Home Assistant, then apply. That writes <code>deck.env</code> from the
+          token already stored here, installs the Stream Deck service, and starts it.
+          Keep <code>auto_reload: true</code> in the YAML so Save updates the deck.
         </p>
         <div class="row">
-          <button type="button" id="btn-ha-test">Test connection</button>
-          <button type="button" id="btn-ha-refresh">Fetch entities</button>
+          <button type="button" id="btn-ha-test">Test Home Assistant</button>
+          <button type="button" id="btn-ha-refresh">Fetch devices</button>
+          <button type="button" id="btn-deck-apply" class="primary">Apply to Stream Deck</button>
           <span id="ha-status" class="status"></span>
         </div>
         <div class="dialog-actions">
