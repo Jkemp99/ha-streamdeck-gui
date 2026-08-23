@@ -1,0 +1,15 @@
+[Unit]
+Description=HA Stream Deck YAML editor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ha-streamdeck-gui
+Environment=STREAMDECK_YAML_PATH=%h/streamdeck/streamdeck.yaml
+ExecStart=%h/ha-streamdeck-gui/.venv/bin/ha-streamdeck-gui serve --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

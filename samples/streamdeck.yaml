@@ -1,5 +1,7 @@
 # Example streamdeck.yaml generated for this project.
-# Entity IDs are placeholders. Replace them with your own Home Assistant entities.
+# Entity IDs are placeholders (light.kitchen, media_player.living_room, …).
+# Replace every entity_id with a real Home Assistant entity before Apply.
+# Saving this file onto a live deck will crash the USB process until you do.
 # Do not commit a live config from your house.
 
 brightness: 80

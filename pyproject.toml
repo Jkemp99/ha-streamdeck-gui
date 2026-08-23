@@ -37,7 +37,7 @@ dev-mode-dirs = ["src"]
 only-include = ["ha_streamdeck_gui"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ha_streamdeck_gui", "README.md", "tests", "samples", "Dockerfile", "docker-compose.yml"]
+include = ["src/ha_streamdeck_gui", "README.md", "TROUBLESHOOTING.md", "tests", "samples", "contrib", "Dockerfile", "docker-compose.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

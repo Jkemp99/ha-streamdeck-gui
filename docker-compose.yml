@@ -1,3 +1,6 @@
+# Editor only. This container does not open Stream Deck USB and cannot
+# install the host systemd unit. Run home-assistant-streamdeck-yaml on the
+# machine the deck is plugged into (see README.md).
 services:
   editor:
     build: .
