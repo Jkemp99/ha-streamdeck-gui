@@ -96,6 +96,62 @@ def ensure_deck_package(settings: AppSettings) -> Path:
     return binary
 
 
+def _package_dir(settings: AppSettings) -> Path:
+    python = deck_venv_dir(settings) / "bin" / "python"
+    found = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import home_assistant_streamdeck_yaml, pathlib; "
+            "print(pathlib.Path(home_assistant_streamdeck_yaml.__file__).parent)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if found.returncode != 0 or not found.stdout.strip():
+        raise DeckServiceError("Could not locate the installed home-assistant-streamdeck-yaml package.")
+    return Path(found.stdout.strip())
+
+
+def ensure_deck_assets(settings: AppSettings) -> Path:
+    """The PyPI wheel often omits assets/ (font + MDI). Copy them from upstream."""
+    root = _package_dir(settings)
+    assets = root / "assets"
+    font = assets / "Roboto-Regular.ttf"
+    if font.is_file():
+        return assets
+    cache = yaml_dir(settings) / ".upstream-home-assistant-streamdeck-yaml"
+    if not (cache / "assets" / "Roboto-Regular.ttf").is_file():
+        if cache.exists():
+            shutil.rmtree(cache)
+        cloned = subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "https://github.com/basnijholt/home-assistant-streamdeck-yaml.git",
+                str(cache),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if cloned.returncode != 0 or not (cache / "assets" / "Roboto-Regular.ttf").is_file():
+            raise DeckServiceError(
+                cloned.stderr.strip()
+                or "Could not download Stream Deck fonts/icons. The pip package is missing assets/.",
+            )
+    if assets.exists():
+        shutil.rmtree(assets)
+    shutil.copytree(cache / "assets", assets)
+    if not font.is_file():
+        raise DeckServiceError("Copied assets/ but Roboto-Regular.ttf is still missing.")
+    return assets
+
+
 def write_user_unit(settings: AppSettings) -> Path:
     binary = deck_binary(settings)
     env_file = deck_env_path(settings)
@@ -136,6 +192,7 @@ def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
 def start_user_service() -> None:
     if shutil.which("systemctl") is None:
         raise DeckServiceError("systemctl is not available on this machine.")
+    _systemctl("reset-failed", SERVICE_NAME)
     reloaded = _systemctl("daemon-reload")
     if reloaded.returncode != 0:
         raise DeckServiceError(reloaded.stderr.strip() or "systemctl --user daemon-reload failed")
@@ -159,7 +216,12 @@ def service_status() -> dict[str, object]:
         }
     active = _systemctl("is-active", SERVICE_NAME)
     show = _systemctl("show", SERVICE_NAME, "--property=ActiveState,SubState,MainPID,FragmentPath")
-    logs = _systemctl("status", SERVICE_NAME, "--no-pager", "-n", "20")
+    logs = subprocess.run(
+        ["journalctl", "--user", "-u", SERVICE_NAME, "-n", "40", "--no-pager"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     if active.returncode == 0 or "ActiveState" in show.stdout:
         return {
             "configured": True,
@@ -197,6 +259,7 @@ def service_status() -> dict[str, object]:
 def apply_from_settings(settings: AppSettings) -> dict[str, object]:
     env_path = write_deck_env(settings)
     binary = ensure_deck_package(settings)
+    assets = ensure_deck_assets(settings)
     unit = write_user_unit(settings)
     start_user_service()
     status = service_status()
@@ -205,6 +268,7 @@ def apply_from_settings(settings: AppSettings) -> dict[str, object]:
             "ok": True,
             "deck_env": str(env_path),
             "binary": str(binary),
+            "assets": str(assets),
             "unit": str(unit),
         },
     )
