@@ -125,7 +125,14 @@ h2 { margin: 0 0 0.6rem; font-size: 0.78rem; letter-spacing: 0.08em; text-transf
   place-items: center;
   padding: 2rem 1rem 3rem;
 }
-.device-caption { color: var(--muted); font-size: 0.8rem; text-align: center; }
+.device-caption {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+  max-width: 36rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 
 .device {
   background: linear-gradient(180deg, var(--bezel-hi), var(--bezel) 30%, #1c1e22);

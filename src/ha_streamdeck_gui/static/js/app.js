@@ -65,6 +65,23 @@ function emptyButton() {
   return { special_type: "empty" };
 }
 
+function isBlankButton(button) {
+  if (!button) return true;
+  if (button.special_type && button.special_type !== "empty") return false;
+  return !button.entity_id && !button.text && !button.icon && !button.icon_mdi && !button.service;
+}
+
+function buttonHasContent(button) {
+  return Boolean(
+    button?.entity_id
+    || button?.service
+    || button?.text
+    || button?.icon
+    || button?.icon_mdi
+    || (button?.special_type && button.special_type !== "empty"),
+  );
+}
+
 function api(path, options = {}) {
   return fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -180,7 +197,7 @@ function previewIcon(item) {
 }
 
 function keyBackground(item) {
-  if (!item || item.special_type === "empty") return "#050506";
+  if (isBlankButton(item)) return "#050506";
   return item.icon_background_color || "#050506";
 }
 
@@ -195,7 +212,7 @@ function ringPercent(item) {
 
 function renderKeyFace(el, item) {
   el.innerHTML = "";
-  if (!item || item.special_type === "empty") return;
+  if (isBlankButton(item)) return;
   el.style.background = keyBackground(item);
   const pct = ringPercent(item);
   if (pct !== null) {
@@ -295,7 +312,7 @@ function renderDevice() {
     const button = (page.buttons || [])[i];
     const key = document.createElement("div");
     key.className = "key";
-    if (!button || button.special_type === "empty") key.classList.add("empty");
+    if (isBlankButton(button)) key.classList.add("empty");
     if (button && isUnknownEntity(button.entity_id)) key.classList.add("stale");
     if (isSelected("button", i)) key.classList.add("selected");
     key.draggable = true;
@@ -464,6 +481,11 @@ function patchButton(patch) {
   const next = { ...selectedButton(), ...patch };
   if (patch.special_type && ["next-page", "previous-page", "empty", "turn-off"].includes(patch.special_type)) {
     delete next.special_type_data;
+  }
+  if (patch.special_type === "" || patch.special_type === null) {
+    next.special_type = null;
+  } else if (next.special_type === "empty" && buttonHasContent(next)) {
+    next.special_type = null;
   }
   writeButton(index, next);
   markDirty();
@@ -859,9 +881,24 @@ function renderIssues() {
   el.textContent = state.issues.map((issue) => issue.message).join(" · ");
 }
 
+function renderDeviceCaption() {
+  const el = document.getElementById("device-caption");
+  if (!el) return;
+  const path = state.settings?.streamdeck_yaml_path;
+  if (!path) {
+    el.textContent = "Set the streamdeck.yaml path in Settings, then click Reload from deck.";
+    return;
+  }
+  const page = currentPage();
+  const keys = (page.buttons || []).filter((button) => !isBlankButton(button)).length;
+  const dials = pairDials(page.dials || []).length;
+  el.textContent = `Loaded from ${path} · ${page.name}: ${keys} key${keys === 1 ? "" : "s"}, ${dials} dial${dials === 1 ? "" : "s"}`;
+}
+
 function render() {
   renderPages();
   renderDevice();
+  renderDeviceCaption();
   renderInspector();
   renderIssues();
 }
@@ -894,6 +931,7 @@ async function openFile() {
   state.selected = null;
   state.dirty = false;
   render();
+  flash(`Loaded ${data.path}`);
 }
 
 async function saveFile() {
