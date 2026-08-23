@@ -32,9 +32,9 @@ def _unknown_entity(entity_id: str | None, path: str, known_entities: set[str] |
     if entity_id in known_entities:
         return None
     return Issue(
-        "warning",
+        "error",
         "unknown_entity",
-        f"entity_id {entity_id!r} was not in the last Home Assistant fetch.",
+        f"entity_id {entity_id!r} is not in Home Assistant and will crash the Stream Deck.",
         path,
         entity_id=entity_id,
     )

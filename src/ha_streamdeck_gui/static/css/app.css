@@ -160,6 +160,18 @@ h2 { margin: 0 0 0.6rem; font-size: 0.78rem; letter-spacing: 0.08em; text-transf
   outline-offset: 3px;
 }
 .key.empty { opacity: 0.55; }
+.key.stale, .strip-cell.stale, .dial.stale {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+.stale-entity {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: #2c1515;
+  color: #ffb4b4;
+  font-size: 0.85rem;
+}
 .key img { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; }
 .key .mdi { font-size: 28px; line-height: 1; }
 .key .label {

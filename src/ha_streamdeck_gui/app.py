@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,7 @@ from ha_streamdeck_gui.ha import (
     suggested_service,
     test_home_assistant,
 )
-from ha_streamdeck_gui.lint import lint_config
+from ha_streamdeck_gui.lint import Issue, lint_config
 from ha_streamdeck_gui.sample import build_sample_config, sample_yaml
 from ha_streamdeck_gui.schema import SPECIAL_TYPES, StreamDeckConfig
 from ha_streamdeck_gui.settings import (
@@ -94,24 +95,74 @@ def _configured_path(explicit: str | None = None) -> Path:
     return Path(raw).expanduser()
 
 
-def _issues_for(config: StreamDeckConfig, *, has_includes: bool = False) -> list[dict[str, str]]:
+def _cache_is_fresh(seconds: int = 30) -> bool:
+    fetched = get_cache().fetched_at
+    if not fetched:
+        return False
+    try:
+        stamp = datetime.fromisoformat(fetched)
+    except ValueError:
+        return False
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - stamp < timedelta(seconds=seconds)
+
+
+def _known_entities(*, refresh: bool) -> set[str] | None:
+    settings = load_settings()
+    if refresh and settings.ha_url and settings.ha_token.strip() and not _cache_is_fresh():
+        try:
+            refresh_cache(settings.ha_url, settings.ha_token)
+        except HomeAssistantError:
+            pass
+    if not get_cache().fetched_at:
+        return None
+    return {entity.entity_id for entity in get_cache().entities}
+
+
+def _issue_payload(issue: Issue) -> dict[str, str]:
+    payload = {
+        "severity": issue.severity,
+        "code": issue.code,
+        "message": issue.message,
+        "path": issue.path,
+    }
+    if issue.entity_id:
+        payload["entity_id"] = issue.entity_id
+    return payload
+
+
+def _issues_for(
+    config: StreamDeckConfig,
+    *,
+    has_includes: bool = False,
+    refresh: bool = False,
+) -> list[dict[str, str]]:
     settings = load_settings()
     deck = get_deck_model(settings.deck_model)
-    known = {entity.entity_id for entity in get_cache().entities} or None
     return [
-        {
-            "severity": issue.severity,
-            "code": issue.code,
-            "message": issue.message,
-            "path": issue.path,
-        }
+        _issue_payload(issue)
         for issue in lint_config(
             config,
             deck=deck,
-            known_entities=known,
+            known_entities=_known_entities(refresh=refresh),
             has_includes=has_includes,
         )
     ]
+
+
+def _reject_lint_errors(issues: list[dict[str, str]]) -> None:
+    hard = [issue for issue in issues if issue["severity"] == "error"]
+    if not hard:
+        return
+    unknown = [issue.get("entity_id") or "" for issue in hard if issue["code"] == "unknown_entity"]
+    names = ", ".join(sorted({name for name in unknown if name}))
+    message = (
+        f"These entity_ids are not in Home Assistant and will crash the Stream Deck: {names}"
+        if names
+        else "Validation failed"
+    )
+    raise HTTPException(400, {"message": message, "issues": issues})
 
 
 @app.get("/")
@@ -171,7 +222,7 @@ def get_config(path: str | None = None) -> dict[str, Any]:
         "config": loaded.config.model_dump(),
         "has_includes": loaded.has_includes,
         "include_paths": loaded.include_paths,
-        "issues": _issues_for(loaded.config, has_includes=loaded.has_includes),
+        "issues": _issues_for(loaded.config, has_includes=loaded.has_includes, refresh=True),
     }
 
 
@@ -189,7 +240,7 @@ def validate_config(payload: ConfigPayload) -> dict[str, Any]:
             raise HTTPException(400, "Provide config or yaml_text.")
     except ValidationError as exc:
         return {"ok": False, "errors": exc.errors(), "issues": []}
-    issues = _issues_for(config, has_includes=has_includes)
+    issues = _issues_for(config, has_includes=has_includes, refresh=True)
     hard = [issue for issue in issues if issue["severity"] == "error"]
     return {
         "ok": not hard,
@@ -225,9 +276,8 @@ def put_config(payload: ConfigPayload) -> dict[str, Any]:
     try:
         if payload.yaml_text is not None:
             loaded = parse_yaml_text(payload.yaml_text, path=target)
-            issues = _issues_for(loaded.config, has_includes=loaded.has_includes)
-            if any(issue["severity"] == "error" for issue in issues):
-                raise HTTPException(400, {"message": "Validation failed", "issues": issues})
+            issues = _issues_for(loaded.config, has_includes=loaded.has_includes, refresh=True)
+            _reject_lint_errors(issues)
             backup = save_yaml_file(
                 target,
                 text=payload.yaml_text,
@@ -237,9 +287,8 @@ def put_config(payload: ConfigPayload) -> dict[str, Any]:
             config = loaded.config
         elif payload.config is not None:
             config = StreamDeckConfig.model_validate(payload.config)
-            issues = _issues_for(config)
-            if any(issue["severity"] == "error" for issue in issues):
-                raise HTTPException(400, {"message": "Validation failed", "issues": issues})
+            issues = _issues_for(config, refresh=True)
+            _reject_lint_errors(issues)
             original = load_yaml_file(target) if target.is_file() else None
             backup = save_yaml_file(
                 target,

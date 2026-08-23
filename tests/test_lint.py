@@ -40,7 +40,17 @@ def test_unknown_entity_on_dials_and_state() -> None:
         ],
     )
     issues = lint_config(config, known_entities={"light.real"})
-    paths = {issue.path for issue in issues if issue.code == "unknown_entity"}
+    unknown = [issue for issue in issues if issue.code == "unknown_entity"]
+    paths = {issue.path for issue in unknown}
     assert "pages.Home.dials[0]" in paths
     assert "state_entity_id" in paths
     assert "pages.Home.buttons[0]" not in paths
+    assert all(issue.severity == "error" for issue in unknown)
+
+
+def test_empty_known_set_flags_every_entity() -> None:
+    config = StreamDeckConfig(
+        pages=[Page(name="Home", buttons=[Button(entity_id="light.real")])],
+    )
+    issues = lint_config(config, known_entities=set())
+    assert any(issue.code == "unknown_entity" and issue.severity == "error" for issue in issues)

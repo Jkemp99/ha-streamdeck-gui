@@ -85,6 +85,20 @@ function currentPage() {
   return pages[state.pageIndex] || pages[0] || { name: "Home", buttons: [], dials: [] };
 }
 
+function isUnknownEntity(entityId) {
+  if (!entityId || String(entityId).includes("{")) return false;
+  if (!state.entities.length) return false;
+  return !state.entities.some((entity) => entity.entity_id === entityId);
+}
+
+function staleEntityNote(entityId) {
+  if (!isUnknownEntity(entityId)) return null;
+  const note = document.createElement("p");
+  note.className = "stale-entity";
+  note.textContent = `${entityId} is not in the latest Home Assistant fetch. Saving this will crash the Stream Deck. Pick a current device.`;
+  return note;
+}
+
 function allPageNames() {
   return [
     ...(state.config.pages || []).map((page) => page.name),
@@ -271,6 +285,7 @@ function renderDevice() {
     const key = document.createElement("div");
     key.className = "key";
     if (!button || button.special_type === "empty") key.classList.add("empty");
+    if (button && isUnknownEntity(button.entity_id)) key.classList.add("stale");
     if (isSelected("button", i)) key.classList.add("selected");
     key.draggable = true;
     key.dataset.index = String(i);
@@ -306,6 +321,7 @@ function renderDevice() {
       const cell = document.createElement("div");
       cell.className = "strip-cell";
       if (isSelected("strip", index)) cell.classList.add("selected");
+      if (visual && isUnknownEntity(visual.entity_id)) cell.classList.add("stale");
       const iconName = previewIcon(visual);
       if (iconName) {
         const icon = document.createElement("span");
@@ -330,6 +346,9 @@ function renderDevice() {
       const knob = document.createElement("div");
       knob.className = "dial";
       if (isSelected("dial", index)) knob.classList.add("selected");
+      if ((slot.turn && isUnknownEntity(slot.turn.entity_id)) || (slot.push && isUnknownEntity(slot.push.entity_id))) {
+        knob.classList.add("stale");
+      }
       const cap = document.createElement("div");
       cap.className = "dial-cap";
       knob.append(cap);
@@ -715,6 +734,8 @@ function renderInspector() {
       );
     }
 
+    const staleButton = staleEntityNote(button.entity_id);
+    if (staleButton) root.append(staleButton);
     root.append(
       field("Entity", entityPicker(button.entity_id, (value) => patchButton({ entity_id: value || null }))),
       field("Service", textInput(button.service || "", (value) => patchButton({ service: value || null }), "light.toggle")),
@@ -762,6 +783,8 @@ function renderInspector() {
     note.textContent = "The strip is the LCD above the dials, not a separate YAML object. Each segment shows that dial.";
     root.append(note);
   }
+  const staleDial = staleEntityNote(dial.entity_id);
+  if (staleDial) root.append(staleDial);
   root.append(
     field("Entity", entityPicker(dial.entity_id, (value) => patchDial({ entity_id: value || null }))),
     field("Service", textInput(dial.service || "", (value) => patchDial({ service: value || null }))),
@@ -831,6 +854,9 @@ async function openFile() {
 
 async function saveFile() {
   try {
+    if (state.settings?.ha_token_set) {
+      await refreshEntities();
+    }
     const result = await api("/api/config", {
       method: "PUT",
       body: JSON.stringify({ config: state.config }),
@@ -853,6 +879,10 @@ function flash(message, err = false) {
 }
 
 async function loadSample() {
+  const ok = window.confirm(
+    "Load the example layout? It uses placeholder entity IDs. Saving that to a live Stream Deck will crash the deck until you replace every entity.",
+  );
+  if (!ok) return;
   const data = await api("/api/sample");
   state.config = data.config;
   state.yamlText = data.yaml_text;
@@ -903,10 +933,11 @@ async function init() {
   state.schema = await api("/api/schema");
   await loadSettings();
   try {
-    const entities = await api("/api/ha/entities");
-    state.entities = entities.entities || [];
-    if (!state.entities.length && state.settings?.ha_token_set) {
+    if (state.settings?.ha_token_set) {
       await refreshEntities();
+    } else {
+      const entities = await api("/api/ha/entities");
+      state.entities = entities.entities || [];
     }
   } catch {
     state.entities = [];
