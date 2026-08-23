@@ -29,11 +29,14 @@ dev = [
 [project.scripts]
 ha-streamdeck-gui = "ha_streamdeck_gui.__main__:main"
 
+[tool.hatch.build]
+dev-mode-dirs = ["src"]
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/ha_streamdeck_gui"]
+only-include = ["ha_streamdeck_gui"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ha_streamdeck_gui", "README.md"]
+include = ["src/ha_streamdeck_gui", "README.md", "tests", "samples", "Dockerfile", "docker-compose.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

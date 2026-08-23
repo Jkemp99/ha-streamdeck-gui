@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stream Deck Editor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" />
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <strong>Stream Deck</strong>
+          <span class="muted">Home Assistant YAML</span>
+        </div>
+      </div>
+      <label class="model-picker">
+        <span>Device</span>
+        <select id="deck-model"></select>
+      </label>
+      <div class="top-actions">
+        <button id="btn-sample" class="ghost" type="button">Load sample</button>
+        <button id="btn-yaml" class="ghost" type="button">YAML</button>
+        <button id="btn-settings" class="ghost" type="button">Settings</button>
+        <button id="btn-reload" type="button">Open</button>
+        <button id="btn-save" class="primary" type="button">Save</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <h2>Pages</h2>
+          <button id="btn-add-page" class="icon-btn" type="button" title="Add page">+</button>
+        </div>
+        <div id="page-list" class="page-list"></div>
+        <div class="sidebar-head anon">
+          <h2>Anonymous</h2>
+          <button id="btn-add-anon" class="icon-btn" type="button" title="Add anonymous page">+</button>
+        </div>
+        <p class="hint">Hidden pages. Reach them with <code>go-to-page</code>. A click returns to the previous page.</p>
+        <div id="anon-list" class="page-list anon"></div>
+      </aside>
+
+      <section class="stage">
+        <div id="issues" class="issues" hidden></div>
+        <div class="stage-center">
+          <div id="device" class="device plus"></div>
+          <p id="device-caption" class="device-caption"></p>
+        </div>
+      </section>
+
+      <aside class="inspector" id="inspector">
+        <p class="empty-inspector">Select a key, dial, or touch-strip segment.</p>
+      </aside>
+    </main>
+
+    <dialog id="settings-dialog" class="modal">
+      <form id="settings-form" method="dialog">
+        <h2>Settings</h2>
+        <p class="warn">
+          This editor has <strong>no login</strong>. Keep it on your LAN.
+          The Home Assistant token is stored only on the server (mode 0600) and is never sent to the browser.
+        </p>
+        <label>streamdeck.yaml path
+          <input name="streamdeck_yaml_path" type="text" placeholder="/opt/streamdeck/streamdeck.yaml" autocomplete="off" />
+        </label>
+        <label>Home Assistant URL (include port)
+          <input name="ha_url" type="url" placeholder="http://192.168.1.10:8123" autocomplete="off" />
+        </label>
+        <label>Long-lived access token
+          <input name="ha_token" type="password" placeholder="unchanged if left blank" autocomplete="new-password" />
+        </label>
+        <label>Backup count
+          <input name="backup_count" type="number" min="1" max="100" />
+        </label>
+        <label>systemd service name (optional)
+          <input name="systemd_service_name" type="text" placeholder="home-assistant-streamdeck-yaml" />
+        </label>
+        <label>Custom icon folder (optional)
+          <input name="assets_dir" type="text" placeholder="Defaults to &lt;yaml-dir&gt;/assets" autocomplete="off" />
+        </label>
+        <p class="hint">
+          With <code>auto_reload: true</code> in the YAML, a service restart is usually unnecessary.
+        </p>
+        <div class="row">
+          <button type="button" id="btn-ha-test">Test connection</button>
+          <button type="button" id="btn-ha-refresh">Fetch entities</button>
+          <span id="ha-status" class="status"></span>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="btn-settings-cancel" value="cancel">Cancel</button>
+          <button class="primary" value="save">Save settings</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="yaml-dialog" class="modal wide">
+      <form method="dialog">
+        <h2>YAML</h2>
+        <p id="yaml-note" class="hint"></p>
+        <textarea id="yaml-text" spellcheck="false"></textarea>
+        <pre id="yaml-diff" class="diff" hidden></pre>
+        <div class="dialog-actions">
+          <button type="button" id="btn-diff">Preview diff</button>
+          <button type="button" id="btn-apply-yaml">Apply YAML to editor</button>
+          <button value="close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/static/js/app.js" type="module"></script>
+  </body>
+</html>

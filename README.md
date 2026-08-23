@@ -63,8 +63,6 @@ Edit keys and dials, then **Save**. Each save writes a timestamped backup next t
 ha-streamdeck-gui validate ~/streamdeck/streamdeck.yaml
 ```
 
-If `ha-streamdeck-gui` is not on your PATH after install, the editor modules are not on this branch yet. Use `python -m ha_streamdeck_gui` once `__main__.py` is present, or check the latest `main`.
-
 ## Docker
 
 Copy `.env.example` to `.env` and fill in only what you want. Never commit `.env`.
