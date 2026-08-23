@@ -23,6 +23,21 @@ class Issue:
     code: str
     message: str
     path: str
+    entity_id: str | None = None
+
+
+def _unknown_entity(entity_id: str | None, path: str, known_entities: set[str] | None) -> Issue | None:
+    if known_entities is None or not entity_id or "{" in entity_id:
+        return None
+    if entity_id in known_entities:
+        return None
+    return Issue(
+        "warning",
+        "unknown_entity",
+        f"entity_id {entity_id!r} was not in the last Home Assistant fetch.",
+        path,
+        entity_id=entity_id,
+    )
 
 
 def lint_config(
@@ -63,16 +78,25 @@ def lint_config(
                 issues.append(
                     Issue("error", "bad_page_index", f"go-to-page index {target} is negative.", loc),
                 )
-        if known_entities is not None and button.entity_id and "{" not in button.entity_id:
-            if button.entity_id not in known_entities:
-                issues.append(
-                    Issue(
-                        "warning",
-                        "unknown_entity",
-                        f"entity_id {button.entity_id!r} was not in the last Home Assistant fetch.",
-                        loc,
-                    ),
-                )
+        unknown = _unknown_entity(button.entity_id, loc, known_entities)
+        if unknown:
+            issues.append(unknown)
+
+    for page_name, is_anon, page in (
+        *((page.name, False, page) for page in config.pages),
+        *((page.name, True, page) for page in config.anonymous_pages),
+    ):
+        kind = "anonymous_pages" if is_anon else "pages"
+        for dial_index, dial in enumerate(page.dials):
+            loc = f"{kind}.{page_name}.dials[{dial_index}]"
+            unknown = _unknown_entity(dial.entity_id, loc, known_entities)
+            if unknown:
+                issues.append(unknown)
+
+    for field_name in ("state_entity_id", "brightness_entity_id"):
+        unknown = _unknown_entity(getattr(config, field_name), field_name, known_entities)
+        if unknown:
+            issues.append(unknown)
 
     for page in config.anonymous_pages:
         if page.name not in targeted:

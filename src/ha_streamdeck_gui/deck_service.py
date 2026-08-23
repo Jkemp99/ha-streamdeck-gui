@@ -7,15 +7,29 @@ import os
 import shutil
 import subprocess
 import sys
+from ctypes.util import find_library
 from pathlib import Path
 
-from ha_streamdeck_gui.ha import hass_streamdeck_endpoint
+from ha_streamdeck_gui.ha import HomeAssistantError, hass_streamdeck_endpoint, refresh_cache
+from ha_streamdeck_gui.lint import lint_config
 from ha_streamdeck_gui.settings import AppSettings
+from ha_streamdeck_gui.yaml_io import load_yaml_file
 
 log = logging.getLogger("ha_streamdeck_gui.deck")
 
 SERVICE_NAME = "home-assistant-streamdeck-yaml"
 UNIT_NAME = f"{SERVICE_NAME}.service"
+RENDER_APT_PACKAGES = (
+    "libcairo2 libpango-1.0-0 libpangocairo-1.0-0 "
+    "libgdk-pixbuf-2.0-0 shared-mime-info"
+)
+CAIRO_SONAMES = ("cairo-2", "cairo", "libcairo.so.2")
+CAIRO_PATHS = (
+    Path("/usr/lib/aarch64-linux-gnu/libcairo.so.2"),
+    Path("/usr/lib/arm-linux-gnueabihf/libcairo.so.2"),
+    Path("/usr/lib/x86_64-linux-gnu/libcairo.so.2"),
+    Path("/usr/lib/libcairo.so.2"),
+)
 
 
 class DeckServiceError(RuntimeError):
@@ -44,6 +58,58 @@ def user_unit_path() -> Path:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg) if xdg else Path.home() / ".config"
     return base / "systemd" / "user" / UNIT_NAME
+
+
+def cairo_library_found() -> bool:
+    if any(find_library(name) for name in CAIRO_SONAMES):
+        return True
+    return any(path.is_file() for path in CAIRO_PATHS)
+
+
+def require_render_libraries() -> None:
+    """Pi OS Lite has no Cairo. Upstream then fails every icon and can ABRT USB."""
+    if cairo_library_found():
+        return
+    raise DeckServiceError(
+        "Cairo is not installed, so Stream Deck icons cannot render. On the Pi run: "
+        f"sudo apt-get install -y {RENDER_APT_PACKAGES}"
+    )
+
+
+def reject_unknown_entities(settings: AppSettings) -> None:
+    """Upstream KeyErrors on missing entity_ids and then resets the hardware."""
+    if not settings.ha_url or not settings.ha_token.strip():
+        raise DeckServiceError("Set the Home Assistant URL and token in Settings first.")
+    try:
+        cache = refresh_cache(settings.ha_url, settings.ha_token)
+    except HomeAssistantError as exc:
+        raise DeckServiceError(
+            f"Could not refresh Home Assistant entities before Apply: {exc}"
+        ) from exc
+    known = {entity.entity_id for entity in cache.entities}
+    if not known:
+        raise DeckServiceError(
+            "Home Assistant returned no entities. Fetch devices, then Apply again."
+        )
+    yaml_path = Path(settings.streamdeck_yaml_path).expanduser()
+    if not yaml_path.is_file():
+        raise DeckServiceError(f"YAML file not found: {yaml_path}")
+    try:
+        loaded = load_yaml_file(yaml_path)
+    except Exception as exc:
+        raise DeckServiceError(f"Could not read streamdeck.yaml: {exc}") from exc
+    unknown = [
+        issue
+        for issue in lint_config(loaded.config, known_entities=known)
+        if issue.code == "unknown_entity"
+    ]
+    if not unknown:
+        return
+    names = ", ".join(sorted({issue.entity_id for issue in unknown if issue.entity_id}))
+    raise DeckServiceError(
+        "These entity_ids are not in Home Assistant and will crash the Stream Deck "
+        f"process: {names}. Replace them in the editor, then Apply again."
+    )
 
 
 def write_deck_env(settings: AppSettings) -> Path:
@@ -125,28 +191,40 @@ def ensure_deck_assets(settings: AppSettings) -> Path:
     if not (cache / "assets" / "Roboto-Regular.ttf").is_file():
         if cache.exists():
             shutil.rmtree(cache)
-        cloned = subprocess.run(
-            [
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "https://github.com/basnijholt/home-assistant-streamdeck-yaml.git",
-                str(cache),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        try:
+            cloned = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "https://github.com/basnijholt/home-assistant-streamdeck-yaml.git",
+                    str(cache),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except FileNotFoundError as exc:
+            raise DeckServiceError(
+                "git is not installed. Install git to download Stream Deck fonts/icons."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise DeckServiceError(
+                "Timed out downloading Stream Deck fonts/icons. Check network on the Pi."
+            ) from exc
         if cloned.returncode != 0 or not (cache / "assets" / "Roboto-Regular.ttf").is_file():
             raise DeckServiceError(
                 cloned.stderr.strip()
                 or "Could not download Stream Deck fonts/icons. The pip package is missing assets/.",
             )
-    if assets.exists():
-        shutil.rmtree(assets)
-    shutil.copytree(cache / "assets", assets)
+    try:
+        if assets.exists():
+            shutil.rmtree(assets)
+        shutil.copytree(cache / "assets", assets)
+    except OSError as exc:
+        raise DeckServiceError(f"Could not copy Stream Deck fonts/icons: {exc}") from exc
     if not font.is_file():
         raise DeckServiceError("Copied assets/ but Roboto-Regular.ttf is still missing.")
     return assets
@@ -163,6 +241,8 @@ def write_user_unit(settings: AppSettings) -> Path:
             "Description=Home Assistant Stream Deck YAML\n"
             "After=network-online.target\n"
             "Wants=network-online.target\n"
+            "StartLimitBurst=3\n"
+            "StartLimitIntervalSec=60\n"
             "\n"
             "[Service]\n"
             "Type=simple\n"
@@ -206,31 +286,50 @@ def start_user_service() -> None:
             )
 
 
+def _status_note(base: str, cairo: bool) -> str:
+    if cairo:
+        return base
+    cairo_note = (
+        "Cairo is missing. Icons will not render. On the Pi run: "
+        f"sudo apt-get install -y {RENDER_APT_PACKAGES}"
+    )
+    return f"{base} {cairo_note}"
+
+
 def service_status() -> dict[str, object]:
+    cairo = cairo_library_found()
     if shutil.which("systemctl") is None:
         return {
             "configured": False,
             "running": False,
             "scope": None,
-            "note": "systemctl is not available.",
+            "cairo": cairo,
+            "note": _status_note("systemctl is not available.", cairo),
         }
     active = _systemctl("is-active", SERVICE_NAME)
     show = _systemctl("show", SERVICE_NAME, "--property=ActiveState,SubState,MainPID,FragmentPath")
-    logs = subprocess.run(
-        ["journalctl", "--user", "-u", SERVICE_NAME, "-n", "40", "--no-pager"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    logs_text = ""
+    if shutil.which("journalctl"):
+        logs = subprocess.run(
+            ["journalctl", "--user", "-u", SERVICE_NAME, "-n", "40", "--no-pager"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        logs_text = logs.stdout
     if active.returncode == 0 or "ActiveState" in show.stdout:
         return {
             "configured": True,
             "running": active.stdout.strip() == "active",
             "state": active.stdout.strip(),
             "scope": "user",
+            "cairo": cairo,
             "details": show.stdout,
-            "logs": logs.stdout,
-            "note": "The Stream Deck process reads streamdeck.yaml. Keep auto_reload: true.",
+            "logs": logs_text,
+            "note": _status_note(
+                "The Stream Deck process reads streamdeck.yaml. Keep auto_reload: true.",
+                cairo,
+            ),
         }
     system = subprocess.run(
         ["systemctl", "is-active", SERVICE_NAME],
@@ -244,19 +343,26 @@ def service_status() -> dict[str, object]:
             "running": True,
             "state": "active",
             "scope": "system",
-            "note": "A system unit is already running.",
+            "cairo": cairo,
+            "note": _status_note("A system unit is already running.", cairo),
         }
     return {
         "configured": False,
         "running": False,
         "state": active.stdout.strip() or "inactive",
         "scope": "user",
-        "logs": logs.stdout,
-        "note": "The Stream Deck service is not running. Use Settings → Apply to Stream Deck.",
+        "cairo": cairo,
+        "logs": logs_text,
+        "note": _status_note(
+            "The Stream Deck service is not running. Use Settings → Apply to Stream Deck.",
+            cairo,
+        ),
     }
 
 
 def apply_from_settings(settings: AppSettings) -> dict[str, object]:
+    require_render_libraries()
+    reject_unknown_entities(settings)
     env_path = write_deck_env(settings)
     binary = ensure_deck_package(settings)
     assets = ensure_deck_assets(settings)

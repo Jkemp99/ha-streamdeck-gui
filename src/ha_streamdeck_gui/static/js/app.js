@@ -880,7 +880,10 @@ async function refreshDeckStatus() {
   const el = document.getElementById("deck-status");
   try {
     const status = await api("/api/service/status");
-    if (status.running) {
+    if (status.cairo === false) {
+      el.className = "status err";
+      el.textContent = status.running ? "Deck: running, icons need Cairo" : "Deck: install Cairo";
+    } else if (status.running) {
       el.className = "status ok";
       el.textContent = "Deck: running";
     } else {

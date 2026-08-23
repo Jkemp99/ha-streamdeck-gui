@@ -31,11 +31,14 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-On Debian / Raspberry Pi OS you may need:
+On Debian / Raspberry Pi OS Lite you also need the libraries that paint keys
+(the GUI will refuse **Apply to Stream Deck** if Cairo is missing):
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-pip
+sudo apt-get install -y python3-venv python3-pip \
+  libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
+  libgdk-pixbuf-2.0-0 shared-mime-info
 ```
 
 Create a starting config (or point at one you already have), then serve:
@@ -94,7 +97,7 @@ docker buildx build --platform linux/amd64,linux/arm64 -t ha-streamdeck-gui .
 5. **YAML** shows the text and a diff against the file on disk.
 6. **Save** validates, then writes. Trailing empty keys are trimmed. Files that still contain `!include` are refused unless you explicitly allow inlining.
 
-A generated example lives in [`samples/streamdeck.yaml`](samples/streamdeck.yaml). It uses placeholder entities (`light.kitchen`, `media_player.living_room`, …). Replace them with your own.
+A generated example lives in [`samples/streamdeck.yaml`](samples/streamdeck.yaml). It uses placeholder entities (`light.kitchen`, `media_player.living_room`, …). Replace every `entity_id` with a real Home Assistant entity before Apply — upstream crashes and resets the deck on a missing id.
 
 ### Deck layouts
 
@@ -162,9 +165,11 @@ Derived from `home_assistant_streamdeck_yaml.py` in `basnijholt/home-assistant-s
 These apply to `home-assistant-streamdeck-yaml` itself, not this GUI. They are easy to lose hours on:
 
 1. Some builds ignore a separate `HASS_PORT` and connect to port 80. Put the port on the host: `HASS_HOST=192.168.1.10:8123`.
-2. The installed wheel may omit `assets/` (font + MDI icons). That causes `FileNotFoundError` on icon save and PIL `cannot open resource` on font load. Copy `assets/` from the upstream repo into the venv `site-packages/` directory. `pipx upgrade` wipes it again.
-3. udev rules for USB vendor `0fd9` are required for non-root access. `TAG+="uaccess"` does not work over SSH (no local seat); use an explicit `MODE`.
-4. A crash can leave libusb mutex assertions and a wedged deck. Unplug and replug the USB cable.
+2. The installed wheel may omit `assets/` (font + MDI icons). That causes `FileNotFoundError` on icon save and PIL `cannot open resource` on font load. Copy `assets/` from the upstream repo into the venv `site-packages/` directory. `pipx upgrade` wipes it again. **Apply to Stream Deck** copies them automatically.
+3. Pi OS Lite does not ship Cairo. Without `libcairo2` (and Pango / gdk-pixbuf) every key logs `Failed to render` / `no library called "cairo-2"`.
+4. A missing `entity_id` is a hard crash in upstream (`KeyError`), then a libusb abort that wedges the deck until you unplug it.
+5. udev rules for USB vendor `0fd9` are required for non-root access. `TAG+="uaccess"` does not work over SSH (no local seat); use an explicit `MODE`.
+6. A crash can leave libusb mutex assertions and a wedged deck. Unplug and replug the USB cable. The user unit now stops after 3 failures in 60s so it does not loop that abort.
 
 This GUI talks to Home Assistant with the full URL you provide, so it does not inherit the `HASS_PORT` bug. It does not open the Stream Deck USB device.
 
