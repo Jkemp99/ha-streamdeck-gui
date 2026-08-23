@@ -378,8 +378,11 @@ function renderDevice() {
 }
 
 function field(label, control) {
-  const wrap = document.createElement("label");
-  wrap.append(label, control);
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  wrap.append(caption, control);
   return wrap;
 }
 
@@ -537,10 +540,42 @@ function entityPicker(value, onPick) {
   });
   domain.value = domains.includes(currentDomain) ? currentDomain : "";
 
+  const pickEntity = async (entityId, event) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    let extra = {};
+    try {
+      const hint = await api(`/api/ha/suggest-service?entity_id=${encodeURIComponent(entityId)}`);
+      if (hint.service) extra = { service: hint.service };
+    } catch {
+      extra = {};
+    }
+    if (state.selected?.kind === "button") {
+      patchButton({ entity_id: entityId || null, ...extra });
+      return;
+    }
+    if (["dial", "strip"].includes(state.selected?.kind)) {
+      patchDial({ entity_id: entityId || null, ...extra });
+      return;
+    }
+    onPick(entityId);
+  };
+
   const draw = () => {
     results.innerHTML = "";
     const query = search.value.trim().toLowerCase();
     const selectedDomain = domain.value;
+    const selected = state.entities.find((entity) => entity.entity_id === value);
+    if (value && !query) {
+      meta.textContent = selected
+        ? `${selected.friendly_name} · ${selected.entity_id}`
+        : value;
+      const hint = document.createElement("p");
+      hint.className = "hint";
+      hint.textContent = "Search above to assign a different device";
+      results.append(hint);
+      return;
+    }
     const matches = state.entities.filter((entity) => {
       if (selectedDomain && entity.domain !== selectedDomain) return false;
       if (!query) return true;
@@ -558,11 +593,8 @@ function entityPicker(value, onPick) {
       const detail = document.createElement("small");
       detail.textContent = `${entity.entity_id} · ${entity.state}`;
       btn.append(title, detail);
-      btn.addEventListener("click", async () => {
-        onPick(entity.entity_id);
-        const hint = await api(`/api/ha/suggest-service?entity_id=${encodeURIComponent(entity.entity_id)}`);
-        if (hint.service && state.selected?.kind === "button") patchButton({ service: hint.service });
-        if (hint.service && ["dial", "strip"].includes(state.selected?.kind)) patchDial({ service: hint.service });
+      btn.addEventListener("click", (event) => {
+        pickEntity(entity.entity_id, event);
       });
       results.append(btn);
     });
@@ -593,7 +625,7 @@ function entityPicker(value, onPick) {
   search.addEventListener("input", draw);
   search.addEventListener("change", () => {
     const raw = search.value.trim();
-    if (raw.includes(".") && !raw.includes(" ")) onPick(raw);
+    if (raw.includes(".") && !raw.includes(" ")) pickEntity(raw);
   });
   wrap.append(domain, search, meta, results);
   draw();

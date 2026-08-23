@@ -54,7 +54,7 @@ input, select, textarea {
   padding: 0.45rem 0.6rem;
 }
 textarea { min-height: 12rem; resize: vertical; }
-label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); }
+label, .field { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); }
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 0.78rem; line-height: 1.4; }
 .warn { font-size: 0.82rem; color: #e8d7a8; background: #2a2414; padding: 0.7rem; border-radius: 8px; }
