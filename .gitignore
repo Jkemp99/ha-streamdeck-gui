@@ -12,3 +12,8 @@ build/
 *.bak
 .ha-streamdeck-gui-backups/
 .DS_Store
+
+# Live configs and server-side secrets — never publish these
+data/
+settings.yaml
+**/settings.yaml

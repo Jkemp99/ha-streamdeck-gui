@@ -1,0 +1,156 @@
+# Example streamdeck.yaml generated for this project.
+# Entity IDs are placeholders. Replace them with your own Home Assistant entities.
+# Do not commit a live config from your house.
+
+brightness: 80
+auto_reload: true
+state_entity_id: input_boolean.streamdeck
+long_press_duration: 0.5
+inactivity_time: 300.0
+pages:
+  - name: Home
+    buttons:
+      - entity_id: light.kitchen
+        service: light.toggle
+        text: Kitchen
+        icon_mdi: lightbulb
+        icon_mdi_color: '#FFC107'
+      - entity_id: light.living_room
+        text: "Living\nroom"
+        icon_mdi: lamp
+        special_type: light-control
+        special_type_data:
+          colormap: hsv
+        long_press:
+          service: light.toggle
+      - text: Media
+        icon_mdi: play-circle
+        special_type: go-to-page
+        special_type_data: Media
+      - text: Scenes
+        icon_mdi: palette
+        special_type: go-to-page
+        special_type_data: Scenes
+      - text: "All\nlights"
+        icon_mdi: lightbulb-group
+        special_type: go-to-page
+        special_type_data: all-lights
+      - text: "Sleep\ndeck"
+        icon_mdi: power-sleep
+        special_type: turn-off
+      - text: Prev
+        icon_mdi: chevron-left
+        special_type: previous-page
+      - text: Next
+        icon_mdi: chevron-right
+        special_type: next-page
+    dials:
+      - entity_id: light.kitchen
+        service: light.turn_on
+        service_data:
+          brightness: '{{ dial_value() | int }}'
+        text: '{{ dial_value() | int }}'
+        icon: ring:{{ ((dial_value() / 255) * 100) | round }}
+        icon_mdi: brightness-6
+        delay: 0.5
+        dial_event_type: TURN
+        state_attribute: brightness
+        attributes:
+          min: 0.0
+          max: 255.0
+          step: 5.0
+        allow_touchscreen_events: true
+      - entity_id: light.kitchen
+        service: light.toggle
+        text: Kitchen
+        icon_mdi: lightbulb
+        dial_event_type: PUSH
+      - entity_id: media_player.living_room
+        service: media_player.volume_set
+        service_data:
+          volume_level: '{{ dial_value() }}'
+        text: Vol
+        icon_mdi: volume-high
+        dial_event_type: TURN
+        state_attribute: volume_level
+        attributes:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+      - entity_id: media_player.living_room
+        service: media_player.media_play_pause
+        icon_mdi: play-pause
+        dial_event_type: PUSH
+      - entity_id: climate.living_room
+        service: climate.set_temperature
+        service_data:
+          temperature: '{{ dial_value() }}'
+        text: '{{ dial_value() }}°'
+        icon_mdi: thermostat
+        dial_event_type: TURN
+        state_attribute: temperature
+        attributes:
+          min: 16.0
+          max: 26.0
+          step: 0.5
+      - entity_id: input_number.example
+        service: input_number.set_value
+        service_data:
+          value: '{{ dial_value() }}'
+        text: '{{ dial_value() | int }}'
+        icon: ring:{{ dial_value() | int }}
+        dial_event_type: TURN
+        attributes:
+          min: 0.0
+          max: 100.0
+          step: 1.0
+  - name: Media
+    buttons:
+      - entity_id: media_player.living_room
+        service: media_player.media_play_pause
+        text: Play
+        icon_mdi: play-pause
+      - entity_id: media_player.living_room
+        service: media_player.volume_mute
+        text: Mute
+        icon_mdi: volume-off
+      - special_type: empty
+      - text: Home
+        icon_mdi: home
+        special_type: go-to-page
+        special_type_data: Home
+  - name: Scenes
+    buttons:
+      - entity_id: scene.movie_night
+        service: scene.turn_on
+        text: "Movie\nnight"
+        icon_mdi: movie
+      - entity_id: scene.good_morning
+        service: scene.turn_on
+        text: Morning
+        icon_mdi: weather-sunset-up
+      - text: Back
+        icon_mdi: keyboard-return
+        special_type: close-page
+      - text: Reload
+        icon_mdi: refresh
+        special_type: reload
+anonymous_pages:
+  - name: all-lights
+    buttons:
+      - entity_id: light.kitchen
+        service: light.toggle
+        text: Kitchen
+      - entity_id: light.living_room
+        service: light.toggle
+        text: Living
+      - entity_id: light.bedroom
+        service: light.toggle
+        text: Bedroom
+      - special_type: empty
+      - special_type: empty
+      - special_type: empty
+      - special_type: empty
+      - text: Back
+        icon_mdi: keyboard-return
+        special_type: close-page
