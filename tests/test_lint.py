@@ -48,6 +48,34 @@ def test_unknown_entity_on_dials_and_state() -> None:
     assert all(issue.severity == "error" for issue in unknown)
 
 
+def test_toggle_on_brightness_dial_warns() -> None:
+    config = StreamDeckConfig(
+        pages=[
+            Page(
+                name="Home",
+                dials=[
+                    Dial(
+                        entity_id="light.office",
+                        service="light.toggle",
+                        service_data={"brightness": "{{ dial_value() | int }}"},
+                        dial_event_type="TURN",
+                        state_attribute="brightness",
+                    ),
+                    Dial(
+                        entity_id="light.office",
+                        service="light.toggle",
+                        dial_event_type="PUSH",
+                    ),
+                ],
+            ),
+        ],
+    )
+    issues = [issue for issue in lint_config(config) if issue.code == "toggle_on_dimmer"]
+    assert len(issues) == 1
+    assert issues[0].severity == "warning"
+    assert issues[0].path == "pages.Home.dials[0]"
+
+
 def test_empty_known_set_flags_every_entity() -> None:
     config = StreamDeckConfig(
         pages=[Page(name="Home", buttons=[Button(entity_id="light.real")])],

@@ -41,6 +41,17 @@ const state = {
   dirty: false,
 };
 
+function serviceForAssignment(entityId, hinted) {
+  const domain = (entityId || "").split(".")[0];
+  const kind = state.selected?.kind;
+  const event = (state.selected?.event || "TURN").toUpperCase();
+  if (["dial", "strip"].includes(kind) && event === "TURN") {
+    if (domain === "light") return "light.turn_on";
+    if (domain === "switch") return "switch.turn_on";
+  }
+  return hinted || null;
+}
+
 function emptyConfig() {
   return {
     brightness: 100,
@@ -550,6 +561,7 @@ function entityPicker(value, onPick) {
     } catch {
       extra = {};
     }
+    extra.service = serviceForAssignment(entityId, extra.service);
     if (state.selected?.kind === "button") {
       patchButton({ entity_id: entityId || null, ...extra });
       return;

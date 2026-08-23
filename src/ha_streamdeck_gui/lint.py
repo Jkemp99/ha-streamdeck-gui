@@ -8,6 +8,7 @@ from typing import Literal
 from ha_streamdeck_gui.decks import DeckModel
 from ha_streamdeck_gui.schema import (
     KNOWN_DIAL_EVENT_TYPES,
+    Dial,
     StreamDeckConfig,
     collect_page_names,
     iter_buttons,
@@ -24,6 +25,24 @@ class Issue:
     message: str
     path: str
     entity_id: str | None = None
+
+
+def _dimmer_toggle_issues(dial: Dial, path: str) -> list[Issue]:
+    event = (dial.dial_event_type or "TURN").upper()
+    service = dial.service or ""
+    data = dial.service_data or {}
+    dims = "brightness" in data or "brightness_pct" in data or dial.state_attribute == "brightness"
+    if event != "TURN" or not dims or not service.endswith(".toggle"):
+        return []
+    return [
+        Issue(
+            "warning",
+            "toggle_on_dimmer",
+            "A brightness dial that calls *.toggle will turn the light off. Use light.turn_on.",
+            path,
+            dial.entity_id,
+        )
+    ]
 
 
 def _unknown_entity(entity_id: str | None, path: str, known_entities: set[str] | None) -> Issue | None:
@@ -92,6 +111,7 @@ def lint_config(
             unknown = _unknown_entity(dial.entity_id, loc, known_entities)
             if unknown:
                 issues.append(unknown)
+            issues.extend(_dimmer_toggle_issues(dial, loc))
 
     for field_name in ("state_entity_id", "brightness_entity_id"):
         unknown = _unknown_entity(getattr(config, field_name), field_name, known_entities)
